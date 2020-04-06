@@ -1,0 +1,10 @@
+{
+  "Throttling": {
+    "ExampleHttpClient": {
+      "MaxCount": 5
+    },
+    "CustomExampleHttpClient": {
+      "MaxCount": 10 
+    } 
+  } 
+}
