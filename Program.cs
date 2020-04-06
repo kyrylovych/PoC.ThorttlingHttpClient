@@ -25,7 +25,7 @@ namespace PoC.HttpRequest.Throttling
             sc.AddHttpClient<ExampleHttpClient>("CustomExampleHttpClient")
                 .AddThrottling(configuration.GetSection("Throttling"));
 
-            sc.BuildServiceProvider()
+            sc.BuildServiceProvider();
         }
     }
 }

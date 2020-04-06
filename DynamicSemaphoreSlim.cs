@@ -54,7 +54,7 @@ namespace PoC.HttpRequest.Throttling
         {
             if (count < 1)
                 return; //log warning or error?.
-            
+
             _innerSlim.Release(count);
         }
 
@@ -73,15 +73,7 @@ namespace PoC.HttpRequest.Throttling
 
         public void Release()
         {
-            try
-            {
-                _readerWriterLockSlim.EnterReadLock();
-                _innerSlim.Release();
-            }
-            finally
-            {
-                _readerWriterLockSlim.ExitReadLock();
-            }
+            _innerSlim.Release();
         }
 
         public void Dispose()
