@@ -9,76 +9,64 @@ namespace PoC.HttpRequest.Throttling
     public class DynamicSemaphoreSlim : IDisposable
     {
         private int _count;
-        private const int Infinity = int.MaxValue;
-        private readonly ReaderWriterLockSlim _readerWriterLockSlim = new ReaderWriterLockSlim(LockRecursionPolicy.NoRecursion);
-        private readonly SemaphoreSlim _innerSlim;
+        private SemaphoreSlim _innerSlim;
+
+        private CancellationTokenSource _cancellationTokenSource = new CancellationTokenSource();
 
         public DynamicSemaphoreSlim(int count)
         {
             _count = count;
-            _innerSlim = new SemaphoreSlim(_count, Infinity);
+            _innerSlim = new SemaphoreSlim(_count, count);
         }
 
+        //returns slim that will no longer be used.
         public void TryChangeCount(int newCount)
         {
             if (newCount == _count)
                 return;
 
-            try
-            {
-                _readerWriterLockSlim.EnterWriteLock();
-                if (newCount < _count)
-                    Decrease(_count - newCount);
-                else
-                    Increase(newCount - _count);
+            var oldSlim = _innerSlim;
+            var oldCancellationToken = _cancellationTokenSource;
 
-                _count = newCount;
-            }
-            finally
-            {
-                _readerWriterLockSlim.ExitWriteLock();
-            }
-        }
-
-        protected void Decrease(int count)
-        {
-            if (_count < count)
-                return; // log warning?
-            for (int i = 0; i < count; i++)
-            {
-                _innerSlim.Wait();
-            }
-        }
-
-        protected void Increase(int count)
-        {
-            if (count < 1)
-                return; //log warning or error?.
-
-            _innerSlim.Release(count);
+            _cancellationTokenSource = new CancellationTokenSource();
+            _innerSlim = new SemaphoreSlim(newCount, newCount);
+            _count = newCount;
+            
+            oldCancellationToken.Cancel(throwOnFirstException: false);
+            oldCancellationToken.Dispose();
+            oldSlim.Dispose();
+            Console.WriteLine("Reload completed");
         }
 
         public async Task WaitAsync(CancellationToken cancellationToken)
         {
             try
             {
-                _readerWriterLockSlim.EnterReadLock();
-                await _innerSlim.WaitAsync(cancellationToken);
+                using (var src = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _cancellationTokenSource.Token))
+                    await _innerSlim.WaitAsync(src.Token);
+                
             }
-            finally
+            catch (Exception e) when(e is ObjectDisposedException || (e is OperationCanceledException && !cancellationToken.IsCancellationRequested))
             {
-                _readerWriterLockSlim.ExitReadLock();
+                if (!cancellationToken.IsCancellationRequested)
+                  await WaitAsync(cancellationToken);
             }
         }
 
         public void Release()
         {
-            _innerSlim.Release();
+            try
+            {
+                _innerSlim.Release();
+            }
+            catch (SemaphoreFullException)
+            {
+
+            }
         }
 
         public void Dispose()
         {
-            _readerWriterLockSlim?.Dispose();
             _innerSlim?.Dispose();
         }
     }

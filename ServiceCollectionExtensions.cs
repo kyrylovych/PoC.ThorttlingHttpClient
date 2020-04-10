@@ -12,7 +12,7 @@ namespace PoC.HttpRequest.Throttling
     {
         public static IHttpClientBuilder AddThrottling(this IHttpClientBuilder builder, IConfiguration configuration)
         {
-            builder.Services.Configure<ThrottleOptions>(builder.Name, configuration);
+            builder.Services.Configure<ThrottleOptions>(builder.Name, configuration.GetSection(builder.Name));
             builder.AddHttpMessageHandler(p => new ThrottleMessageHandler(p.GetRequiredService<ConfigurableThrottleProvider>(), builder.Name));
             return builder;
         }
