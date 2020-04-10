@@ -59,10 +59,9 @@ namespace PoC.HttpRequest.Throttling
             {
                 _innerSlim.Release();
             }
-            catch (SemaphoreFullException)
-            {
-
-            }
+            catch (ObjectDisposedException) { }
+            catch (OperationCanceledException) { }
+            catch (SemaphoreFullException) { }
         }
 
         public void Dispose()
