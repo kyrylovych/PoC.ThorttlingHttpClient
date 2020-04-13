@@ -8,48 +8,61 @@ namespace PoC.HttpRequest.Throttling
 {
     public class DynamicSemaphoreSlim : IDisposable
     {
-        private int _count;
-        private SemaphoreSlim _innerSlim;
+        //0 - false, 1 - true
+        private int updateMode = 0;
 
-        private CancellationTokenSource _cancellationTokenSource = new CancellationTokenSource();
+        private SemaphoreSlim semaphoreSlim;
+        private CancellationTokenSource cancellationTokenSource;
+        private int semaphoreCount;
+
 
         public DynamicSemaphoreSlim(int count)
         {
-            _count = count;
-            _innerSlim = new SemaphoreSlim(_count, count);
+            cancellationTokenSource = new CancellationTokenSource();
+            semaphoreSlim = new SemaphoreSlim(count, count);
+            semaphoreCount = count;
         }
 
-        //returns slim that will no longer be used.
-        public void TryChangeCount(int newCount)
+        //True when changes has been applied. //False when not applied. (update in progress)
+        public bool TryChangeCount(int newCount)
         {
-            if (newCount == _count)
-                return;
+            if (Interlocked.Exchange(ref updateMode, 1) != 0)
+                return false; // update in progress ignore it.
 
-            var oldSlim = _innerSlim;
-            var oldCancellationToken = _cancellationTokenSource;
+            try
+            {
+                if (newCount != semaphoreCount)
+                {
+                    var oldSemaphore = semaphoreSlim;
+                    var oldCancellationTokenSource = cancellationTokenSource;
 
-            _cancellationTokenSource = new CancellationTokenSource();
-            _innerSlim = new SemaphoreSlim(newCount, newCount);
-            _count = newCount;
-            
-            oldCancellationToken.Cancel(throwOnFirstException: false);
-            oldCancellationToken.Dispose();
-            oldSlim.Dispose();
-            Console.WriteLine("Reload completed");
+                    semaphoreSlim = new SemaphoreSlim(newCount, newCount);
+                    cancellationTokenSource = new CancellationTokenSource();
+                    semaphoreCount = newCount;
+                    
+                    oldCancellationTokenSource.Cancel(throwOnFirstException: false);
+                    oldCancellationTokenSource.Dispose();
+                    oldSemaphore.Dispose();
+                }
+                return true;
+            } // possible memory leak?
+            finally
+            {
+                Interlocked.Exchange(ref updateMode, 0);
+            }
         }
 
         public async Task WaitAsync(CancellationToken cancellationToken)
         {
             try
             {
-                using (var src = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _cancellationTokenSource.Token))
-                    await _innerSlim.WaitAsync(src.Token);
-                
+                using (var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, cancellationTokenSource.Token))
+                    await semaphoreSlim.WaitAsync(linked.Token);
             }
-            catch (Exception e) when(e is ObjectDisposedException || (e is OperationCanceledException && !cancellationToken.IsCancellationRequested))
+            catch(Exception e) when (e is ObjectDisposedException || (e is OperationCanceledException && !cancellationToken.IsCancellationRequested))
             {
-                if (!cancellationToken.IsCancellationRequested)
-                  await WaitAsync(cancellationToken);
+                if (semaphoreSlim != null) //semaphore has been changed. re-enter to queue. 
+                    await WaitAsync(cancellationToken);
             }
         }
 
@@ -57,16 +70,16 @@ namespace PoC.HttpRequest.Throttling
         {
             try
             {
-                _innerSlim.Release();
-            }
+                semaphoreSlim.Release();
+            }//there can be exceptions when semaphore has been changed.
             catch (ObjectDisposedException) { }
-            catch (OperationCanceledException) { }
             catch (SemaphoreFullException) { }
         }
 
         public void Dispose()
         {
-            _innerSlim?.Dispose();
+            semaphoreSlim?.Dispose();
+            semaphoreSlim = null;
         }
     }
 }
